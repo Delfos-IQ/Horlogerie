@@ -7,8 +7,7 @@
  */
 
 const CONFIG = {
-  // ← CHANGE THIS after deploying your Cloudflare Worker
-  WORKER_URL: 'https://horlogerie-api.YOUR-SUBDOMAIN.workers.dev'
+  WORKER_URL: 'https://horlogerie.pedicode-app.workers.dev'
 };
 
 /**
