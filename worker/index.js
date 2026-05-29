@@ -1,179 +1,220 @@
 /**
  * Cloudflare Worker — Horlogerie API
+ * Worker URL: https://horlogerie.pedicode-app.workers.dev
+ *
+ * GROQ_API_KEY must be configured as a Secret in the Cloudflare dashboard:
+ *   Workers & Pages → horlogerie → Settings → Variables and Secrets
+ *   → Add variable → Type: Secret → Name: GROQ_API_KEY → Value: gsk_...
  *
  * Routes:
- *   POST /identify  — Identify a watch from a photo (Groq LLaMA 4 Scout Vision)
- *   POST /details   — Fetch full specs + price (Groq LLaMA 4 Scout + web search via Groq)
- *
- * Environment variables (set in Cloudflare dashboard → Workers → Settings → Variables):
- *   GROQ_API_KEY     — Your Groq API key (console.groq.com)
- *   ALLOWED_ORIGIN   — Your GitHub Pages URL, e.g. https://yourusername.github.io
+ *   POST /identify  — 2-pass watch identification (Scout vision → Maverick reasoning)
+ *   POST /details   — Full specs + market price (Maverick)
+ *   GET  /health    — Health check
  */
+
+const CORS_ORIGIN   = '*';
+const MODEL_VISION  = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const MODEL_VERIFY  = 'meta-llama/llama-4-maverick-17b-128e-instruct';
+const MODEL_DETAILS = 'meta-llama/llama-4-maverick-17b-128e-instruct';
 
 export default {
   async fetch(request, env) {
-    // CORS preflight
-    if (request.method === 'OPTIONS') {
-      return corsResponse(null, 204, env);
+    if (request.method === 'OPTIONS') return corsResponse(null, 204);
+
+    if (!env.GROQ_API_KEY) {
+      return corsResponse({
+        error: 'GROQ_API_KEY secret not configured. Go to Cloudflare dashboard → Workers → horlogerie → Settings → Variables and Secrets → add GROQ_API_KEY as a Secret.'
+      }, 500);
     }
 
     const url = new URL(request.url);
-    const origin = request.headers.get('Origin') || '';
-
-    // Only allow requests from your GitHub Pages domain (or localhost for dev)
-    const allowed = env.ALLOWED_ORIGIN || '';
-    if (allowed && origin !== allowed && !origin.includes('localhost')) {
-      return corsResponse({ error: 'Origin not allowed' }, 403, env);
-    }
 
     try {
-      if (url.pathname === '/identify' && request.method === 'POST') {
+      if (url.pathname === '/identify' && request.method === 'POST')
         return await handleIdentify(request, env);
-      }
-      if (url.pathname === '/details' && request.method === 'POST') {
+      if (url.pathname === '/details'  && request.method === 'POST')
         return await handleDetails(request, env);
-      }
-      return corsResponse({ error: 'Not found' }, 404, env);
+      if (url.pathname === '/' || url.pathname === '/health')
+        return corsResponse({ status: 'ok', service: 'horlogerie-api', version: '2.1' }, 200);
+
+      return corsResponse({ error: 'Not found' }, 404);
     } catch (e) {
-      return corsResponse({ error: e.message }, 500, env);
+      console.error(e);
+      return corsResponse({ error: e.message }, 500);
     }
   }
 };
 
-/* ─────────────────────────────────────────
-   /identify — Vision: who made this watch?
-───────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════
+   /identify  —  Two-pass watch identification
+   Pass 1: Scout vision  → extract all visual evidence
+   Pass 2: Maverick text → reason to final identification
+═══════════════════════════════════════════════════════ */
 async function handleIdentify(request, env) {
-  const body = await request.json();
-  const { image, mediaType } = body;
+  const { image, mediaType } = await request.json();
+  if (!image) return corsResponse({ error: 'Missing image' }, 400);
 
-  if (!image) return corsResponse({ error: 'Missing image' }, 400, env);
+  const extractPrompt = `You are an expert watch analyst. Study this watch photo with maximum attention.
 
-  const prompt = `You are a luxury watch expert. Look at this watch photo carefully.
-Identify the watch and respond ONLY with a valid JSON object — no markdown, no backticks, no preamble:
-{
-  "brand": "brand name",
-  "model": "model name",
-  "ref": "reference number if visible, or empty string",
-  "type": "automatic|quartz|manual",
-  "confidence": "high|medium|low"
-}
-If you cannot identify it at all, use brand="Unknown" and model="Watch".`;
+Systematically describe EVERY visible detail you can read or infer:
 
-  const groqRes = await callGroq(env.GROQ_API_KEY, {
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-    max_tokens: 256,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image_url',
-            image_url: { url: `data:${mediaType};base64,${image}` }
-          },
-          { type: 'text', text: prompt }
-        ]
-      }
-    ]
+1. DIAL: What text, logo, brand name, or signatures appear on the dial? List exact text.
+2. HANDS: Shape and style (sword, baton, dauphine, lollipop, Mercedes, etc.)
+3. INDICES / HOUR MARKERS: Shape, material, color (applied, printed, Arabic, Roman)
+4. BEZEL: Type (rotating, fixed, fluted, smooth), material, markings, color
+5. CASE: Shape (round, cushion, tonneau), crown position, pushers visible?
+6. CROWN: Shape, guards, logo engraved?
+7. CASEBACK: Visible or not?
+8. BRACELET/STRAP: Type, material, clasp visible?
+9. COMPLICATIONS: Date window, chronograph subdials, GMT hand, moonphase?
+10. COLORS: Dominant dial color, accent colors
+11. OVERALL STYLE: Sport, dress, diver, pilot, racing
+
+Be extremely precise. Quote any text you can read literally.`;
+
+  const pass1 = await callGroq(env, {
+    model: MODEL_VISION,
+    max_tokens: 800,
+    temperature: 0.1,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: `data:${mediaType};base64,${image}` } },
+        { type: 'text', text: extractPrompt }
+      ]
+    }]
   });
 
-  const text = groqRes.choices?.[0]?.message?.content || '{}';
-  const json = parseJSON(text);
-  return corsResponse(json, 200, env);
+  const visualAnalysis = pass1.choices?.[0]?.message?.content || 'No analysis available';
+
+  const identifyPrompt = `You are a master horologist with 30 years of experience identifying watches from every brand.
+
+A watch photo has been analysed and the following visual details were extracted:
+
+--- VISUAL ANALYSIS ---
+${visualAnalysis}
+--- END ANALYSIS ---
+
+Based on these visual clues, identify this watch using your deep knowledge of:
+- Brand logos, dial typography, and signature design elements
+- Model-specific bezel types, hand shapes, and case proportions
+- Reference-specific dial variations and color codes
+- Historical design evolution of each manufacturer
+
+Think step by step:
+1. Which brand does the dial text/logo point to?
+2. Which model family do the design elements suggest?
+3. Can you narrow down to a specific reference?
+4. What movement type is most likely?
+5. How confident are you?
+
+Then output ONLY this JSON (no markdown, no backticks):
+{
+  "brand": "exact brand name",
+  "model": "exact model name",
+  "ref": "reference number if identifiable, else empty string",
+  "type": "automatic or quartz or manual",
+  "confidence": "high or medium or low",
+  "reasoning": "1-2 sentences explaining the key visual clues that led to this identification"
+}`;
+
+  const pass2 = await callGroq(env, {
+    model: MODEL_VERIFY,
+    max_tokens: 400,
+    temperature: 0.1,
+    messages: [{ role: 'user', content: identifyPrompt }]
+  });
+
+  const result = parseJSON(pass2.choices?.[0]?.message?.content || '{}');
+  result._analysis = visualAnalysis;
+  return corsResponse(result, 200);
 }
 
-/* ─────────────────────────────────────────
-   /details — Specs + price for a watch
-───────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════
+   /details  —  Full technical specs + market price
+═══════════════════════════════════════════════════════ */
 async function handleDetails(request, env) {
-  const body = await request.json();
-  const { brand, model, ref, type } = body;
+  const { brand, model, ref, type } = await request.json();
+  if (!brand || !model) return corsResponse({ error: 'Missing brand or model' }, 400);
 
-  if (!brand || !model) return corsResponse({ error: 'Missing brand or model' }, 400, env);
+  const watchId  = [brand, model, ref].filter(Boolean).join(' ');
+  const movLabel = type === 'automatic' ? 'automatic' : type === 'quartz' ? 'quartz' : 'manual winding';
 
-  const watchId = [brand, model, ref].filter(Boolean).join(' ');
-  const typeLabel = type === 'automatic' ? 'automatic' : type === 'quartz' ? 'quartz' : 'manual winding';
+  const prompt = `You are a professional horologist, certified watch appraiser, and market analyst.
+Provide precise technical specifications and current market data for: ${watchId} (${movLabel}).
 
-  const prompt = `You are a professional watch expert and horologist with access to current market data.
-Research the watch: ${watchId} (${typeLabel} movement).
+Think carefully — only include values you are confident about.
 
-Return ONLY a valid JSON object with NO markdown, NO backticks, NO extra text:
+Respond ONLY with this JSON (no markdown, no backticks):
 {
   "specs": {
-    "calibre": "movement/caliber name and number",
-    "movimiento": "movement type description (e.g. Swiss lever escapement, 28800vph)",
-    "cristal": "crystal type (sapphire/mineral/acrylic) and shape (flat/domed/double-domed)",
-    "brazalete": "bracelet or strap type and material",
-    "esfera": "dial description (color, indexes, complications)",
-    "caja": "case material and shape",
-    "resistencia": "water resistance in meters and ATM",
-    "reserva": "power reserve in hours (for automatic/manual only, empty for quartz)",
-    "diametro": "case diameter in mm",
-    "grosor": "case thickness in mm"
+    "calibre":     "caliber name and number (e.g. Rolex Cal. 3135, ETA 2824-2, Sellita SW200)",
+    "movimiento":  "movement detail: type, frequency, jewel count (e.g. COSC chronometer, 28800vph, 31 jewels)",
+    "cristal":     "crystal: material + coating + profile (e.g. Sapphire, double anti-reflective, flat)",
+    "brazalete":   "bracelet or strap: name, material, clasp (e.g. Oyster bracelet, 904L steel, Oysterlock clasp)",
+    "esfera":      "dial: color, indexes, finishing, complications (e.g. Black lacquered, applied gold indices, date 3h)",
+    "caja":        "case: material + treatment (e.g. 316L steel brushed/polished, screw-down crown, solid caseback)",
+    "resistencia": "water resistance (e.g. 300m / 30 ATM)",
+    "reserva":     "power reserve — leave empty for quartz (e.g. 48h, 70h)",
+    "diametro":    "case diameter (e.g. 40mm)",
+    "grosor":      "case thickness (e.g. 12.5mm)"
   },
   "price": {
-    "value": "price range in EUR (e.g. '3.500 – 4.200 €') or 'N/A'",
-    "note": "brief note about price (new retail vs pre-owned, trend, year)"
+    "value": "estimated price range in EUR (e.g. 'Nuevo: ~8.100 € · Segundamano: 6.500 – 7.800 €')",
+    "note":  "boutique vs grey market context, demand trend, max 2 sentences"
   }
 }
-Be precise. If you don't know a specific value, use an empty string — do not guess.`;
+Leave empty string for any value you are not certain about. Never invent specifications.`;
 
-  const groqRes = await callGroq(env.GROQ_API_KEY, {
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-    max_tokens: 800,
-    messages: [
-      { role: 'user', content: prompt }
-    ]
+  const groqRes = await callGroq(env, {
+    model: MODEL_DETAILS,
+    max_tokens: 1000,
+    temperature: 0.15,
+    messages: [{ role: 'user', content: prompt }]
   });
 
-  const text = groqRes.choices?.[0]?.message?.content || '{}';
-  const json = parseJSON(text);
-  return corsResponse(json, 200, env);
+  return corsResponse(parseJSON(groqRes.choices?.[0]?.message?.content || '{}'), 200);
 }
 
-/* ─────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════
    Helpers
-───────────────────────────────────────── */
+═══════════════════════════════════════════════════════ */
 
-async function callGroq(apiKey, payload) {
-  if (!apiKey) throw new Error('GROQ_API_KEY not set in Worker environment');
+async function callGroq(env, payload) {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${env.GROQ_API_KEY}`
     },
     body: JSON.stringify(payload)
   });
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Groq error ${res.status}: ${err.slice(0, 200)}`);
+    throw new Error(`Groq ${res.status}: ${err.slice(0, 300)}`);
   }
   return res.json();
 }
 
 function parseJSON(text) {
-  // Strip markdown fences if model adds them
   const clean = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-  try {
-    return JSON.parse(clean);
-  } catch {
-    // Try to extract first {...} block
-    const match = clean.match(/\{[\s\S]*\}/);
-    if (match) {
-      try { return JSON.parse(match[0]); } catch {}
-    }
-    return { error: 'Could not parse response', raw: clean.slice(0, 300) };
-  }
+  try { return JSON.parse(clean); } catch {}
+  const match = clean.match(/\{[\s\S]*\}/);
+  if (match) { try { return JSON.parse(match[0]); } catch {} }
+  return { error: 'Could not parse model response', raw: clean.slice(0, 300) };
 }
 
-function corsResponse(data, status, env) {
-  const origin = env?.ALLOWED_ORIGIN || '*';
-  const headers = {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
-  return new Response(data === null ? '' : JSON.stringify(data), { status, headers });
+function corsResponse(data, status) {
+  return new Response(
+    data === null ? '' : JSON.stringify(data),
+    {
+      status,
+      headers: {
+        'Content-Type':                 'application/json',
+        'Access-Control-Allow-Origin':  CORS_ORIGIN,
+        'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      }
+    }
+  );
 }
