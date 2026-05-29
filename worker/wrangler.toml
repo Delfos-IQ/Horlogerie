@@ -4,3 +4,13 @@ compatibility_date = "2024-01-01"
 
 # Deploy with: wrangler deploy
 # Worker URL: https://horlogerie.pedicode-app.workers.dev
+
+# KV namespace binding — create it first in Cloudflare dashboard:
+#   Workers & Pages → KV → Create namespace → name it "HORLOGERIE"
+#   Then paste the namespace ID below.
+# Or run: wrangler kv:namespace create HORLOGERIE
+#   and paste the id from the output.
+
+[[kv_namespaces]]
+binding = "HORLOGERIE_KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"

@@ -13,9 +13,11 @@
  */
 
 const CORS_ORIGIN   = '*';
+// Scout is confirmed available on Groq free tier (vision + text).
+// Maverick requires preview access — do not use on free accounts.
 const MODEL_VISION  = 'meta-llama/llama-4-scout-17b-16e-instruct';
-const MODEL_VERIFY  = 'meta-llama/llama-4-maverick-17b-128e-instruct';
-const MODEL_DETAILS = 'meta-llama/llama-4-maverick-17b-128e-instruct';
+const MODEL_VERIFY  = 'meta-llama/llama-4-scout-17b-16e-instruct';
+const MODEL_DETAILS = 'meta-llama/llama-4-scout-17b-16e-instruct';
 
 export default {
   async fetch(request, env) {
@@ -30,12 +32,23 @@ export default {
     const url = new URL(request.url);
 
     try {
+      // ── AI endpoints ──
       if (url.pathname === '/identify' && request.method === 'POST')
         return await handleIdentify(request, env);
       if (url.pathname === '/details'  && request.method === 'POST')
         return await handleDetails(request, env);
+
+      // ── Sync / storage endpoints (require KV binding) ──
+      if (url.pathname === '/sync/push'  && request.method === 'POST')
+        return await handleSyncPush(request, env);
+      if (url.pathname === '/sync/pull'  && request.method === 'GET')
+        return await handleSyncPull(request, env);
+      if (url.pathname === '/sync/clear' && request.method === 'DELETE')
+        return await handleSyncClear(request, env);
+
+      // ── Health ──
       if (url.pathname === '/' || url.pathname === '/health')
-        return corsResponse({ status: 'ok', service: 'horlogerie-api', version: '2.1' }, 200);
+        return corsResponse({ status: 'ok', service: 'horlogerie-api', version: '3.0', kv: !!env.HORLOGERIE_KV }, 200);
 
       return corsResponse({ error: 'Not found' }, 404);
     } catch (e) {
@@ -174,6 +187,54 @@ Leave empty string for any value you are not certain about. Never invent specifi
   });
 
   return corsResponse(parseJSON(groqRes.choices?.[0]?.message?.content || '{}'), 200);
+}
+
+/* ═══════════════════════════════════════════════════════
+   KV SYNC — Cloud storage for watch collection
+   Requires KV namespace bound as HORLOGERIE_KV.
+   Single user: all data stored under key "watches_v2".
+
+   Setup in Cloudflare dashboard:
+     Workers & Pages → KV → Create namespace "HORLOGERIE"
+     Workers → horlogerie → Settings → Bindings → Add KV
+       Variable name: HORLOGERIE_KV  →  Namespace: HORLOGERIE
+═══════════════════════════════════════════════════════ */
+
+const KV_KEY = 'watches_v2';
+
+async function handleSyncPush(request, env) {
+  if (!env.HORLOGERIE_KV) {
+    return corsResponse({ error: 'KV not configured. See README for setup instructions.' }, 503);
+  }
+  const body = await request.json();
+  if (!body.watches || !Array.isArray(body.watches)) {
+    return corsResponse({ error: 'Invalid payload: expected { watches: [...] }' }, 400);
+  }
+  const payload = {
+    watches:   body.watches,
+    updatedAt: Date.now(),
+    version:   2,
+  };
+  await env.HORLOGERIE_KV.put(KV_KEY, JSON.stringify(payload));
+  return corsResponse({ ok: true, count: body.watches.length, updatedAt: payload.updatedAt }, 200);
+}
+
+async function handleSyncPull(request, env) {
+  if (!env.HORLOGERIE_KV) {
+    return corsResponse({ error: 'KV not configured. See README for setup instructions.' }, 503);
+  }
+  const raw = await env.HORLOGERIE_KV.get(KV_KEY);
+  if (!raw) return corsResponse({ watches: [], updatedAt: null }, 200);
+  const data = JSON.parse(raw);
+  return corsResponse(data, 200);
+}
+
+async function handleSyncClear(request, env) {
+  if (!env.HORLOGERIE_KV) {
+    return corsResponse({ error: 'KV not configured.' }, 503);
+  }
+  await env.HORLOGERIE_KV.delete(KV_KEY);
+  return corsResponse({ ok: true }, 200);
 }
 
 /* ═══════════════════════════════════════════════════════
