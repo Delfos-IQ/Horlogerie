@@ -8,13 +8,15 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Horlogerie">
 <meta name="description" content="Gestión de colección de relojes">
-<link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="192x192" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="512x512" href="./icons/icon-512.png">
 <title>Horlogerie</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="./css/app.css">
 </head>
 <body>
 <div id="app">
@@ -106,7 +108,13 @@
         <i class="ti ti-wand" aria-hidden="true"></i> Buscar información completa
       </button>
       <div id="d-fetch-status"></div>
-      <div style="height:10px;"></div>
+
+      <div id="d-notes-section" style="margin-top:6px;margin-bottom:10px;">
+        <div class="section-title" style="margin-bottom:6px;">Notas</div>
+        <div id="d-notes-val" style="font-size:13px;color:var(--mid);line-height:1.6;background:var(--dark2);border:0.5px solid var(--glass-border);border-radius:10px;padding:10px 12px;min-height:38px;"></div>
+      </div>
+
+      <div style="height:6px;"></div>
       <button class="action-btn btn-delete" onclick="deleteWatch(currentWatchId)">
         <i class="ti ti-trash" aria-hidden="true"></i> Eliminar reloj
       </button>
@@ -144,6 +152,38 @@
       </button>
       <div id="identify-status"></div>
 
+      <!-- Editable result fields shown after AI identification -->
+      <div id="identify-result-fields" style="display:none;">
+        <div class="identify-result-box">
+          <div class="identify-result-title">Resultado IA — edita si es necesario</div>
+          <div class="form-field" style="margin-bottom:10px;">
+            <label class="form-label">Marca identificada</label>
+            <input class="form-input" id="ir-brand" placeholder="Marca...">
+          </div>
+          <div class="form-field" style="margin-bottom:10px;">
+            <label class="form-label">Modelo identificado</label>
+            <input class="form-input" id="ir-model" placeholder="Modelo...">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+            <div class="form-field" style="margin-bottom:0;">
+              <label class="form-label">Referencia</label>
+              <input class="form-input" id="ir-ref" placeholder="Ref...">
+            </div>
+            <div class="form-field" style="margin-bottom:0;">
+              <label class="form-label">Tipo</label>
+              <select class="form-input form-select" id="ir-type">
+                <option value="automatic">Automático</option>
+                <option value="quartz">Cuarzo</option>
+                <option value="manual">Manual</option>
+              </select>
+            </div>
+          </div>
+          <button class="modal-btn modal-btn-save" style="width:100%;padding:12px;" onclick="applyIdentifyResult()">
+            <i class="ti ti-check"></i> Usar estos datos
+          </button>
+        </div>
+      </div>
+
       <div class="form-field">
         <label class="form-label">Marca</label>
         <input class="form-input" id="f-brand" placeholder="Rolex, Omega, Seiko...">
@@ -178,13 +218,13 @@
 
 </div><!-- #app -->
 
-<script src="js/storage.js"></script>
-<script src="js/api.js"></script>
-<script src="js/app.js"></script>
+<script src="./js/storage.js"></script>
+<script src="./js/api.js"></script>
+<script src="./js/app.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
+      navigator.serviceWorker.register('/horlogerie/sw.js', { scope: '/horlogerie/' }).catch(() => {});
     });
   }
 </script>
