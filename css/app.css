@@ -642,3 +642,108 @@ textarea.form-input { resize: none; line-height: 1.5; }
   padding: 8px 0 14px;
   line-height: 1.5;
 }
+
+/* ===== SETTINGS VIEW ===== */
+.settings-body {
+  padding: 16px;
+  padding-bottom: 32px;
+}
+.settings-section-title {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 10px;
+  padding-left: 2px;
+}
+.settings-card {
+  background: var(--dark2);
+  border: 0.5px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.settings-card:active { border-color: var(--gold); }
+.export-card { border-color: rgba(184,150,62,0.35); }
+.settings-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 0.5px solid transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.settings-card-text { flex: 1; min-width: 0; }
+.settings-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--light);
+  margin-bottom: 2px;
+}
+.settings-card-sub {
+  font-size: 11px;
+  color: var(--mid);
+  line-height: 1.4;
+}
+.settings-card-arrow {
+  color: var(--mid);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+.settings-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.settings-stat-card {
+  background: var(--dark2);
+  border: 0.5px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 12px 8px;
+  text-align: center;
+}
+.settings-stat-val {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 300;
+  color: var(--gold-light);
+  line-height: 1;
+}
+.settings-stat-label {
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--mid);
+  margin-top: 4px;
+}
+.settings-about {
+  background: var(--dark2);
+  border: 0.5px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+}
+
+/* ===== SYNC ===== */
+@keyframes spin { to { transform: rotate(360deg); } }
+.settings-info-box {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: var(--dark2);
+  border: 0.5px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--mid);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}

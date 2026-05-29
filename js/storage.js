@@ -19,9 +19,11 @@ function loadData() {
 function save() {
   try {
     localStorage.setItem(DB_KEY, JSON.stringify(watches));
+    // Auto-push to cloud after every local write (debounced)
+    if (typeof window._debouncedPush === 'function') window._debouncedPush();
   } catch (e) {
     // storage full — photos take space, warn user
-    showToast('⚠️ Almacenamiento lleno. Elimina algún reloj.');
+    if (typeof showToast === 'function') showToast('⚠️ Almacenamiento lleno. Elimina algún reloj.');
   }
 }
 

@@ -697,3 +697,112 @@ window.handleStartWearing  = handleStartWearing;
 window.handleStopWearing   = handleStopWearing;
 window.fetchWatchDetails   = fetchWatchDetails;
 window.openEditModal       = openEditModal;
+
+/* ─────────────────── SETTINGS ─────────────────── */
+
+function renderSettings() {
+  const ws    = getWatches();
+  const grid  = document.getElementById('settings-stats');
+  if (!grid) return;
+
+  const activeW   = getActiveWatch();
+  const autoCount  = ws.filter(w => w.type === 'automatic').length;
+  const qtzCount   = ws.filter(w => w.type === 'quartz').length;
+  const manCount   = ws.filter(w => w.type === 'manual').length;
+  const totalSess  = ws.reduce((a, w) => a + (w.history?.length || 0) + (w.wearStart ? 1 : 0), 0);
+  const totalDays  = ws.reduce((a, w) => {
+    const all = [...(w.history || [])];
+    if (w.wearStart) all.push({ start: w.wearStart, end: Date.now() });
+    return a + all.reduce((s, i) => s + Math.max(1, Math.ceil(((i.end || Date.now()) - i.start) / 86400000)), 0);
+  }, 0);
+
+  const stats = [
+    { v: ws.length,    l: 'Relojes' },
+    { v: autoCount,    l: 'Automáticos' },
+    { v: qtzCount,     l: 'Cuarzo' },
+    { v: manCount,     l: 'Manual' },
+    { v: totalSess,    l: 'Sesiones' },
+    { v: totalDays,    l: 'Días uso' },
+  ];
+
+  grid.innerHTML = stats.map(s => `
+    <div class="settings-stat-card">
+      <div class="settings-stat-val">${s.v}</div>
+      <div class="settings-stat-label">${s.l}</div>
+    </div>`).join('');
+}
+
+async function handleExportPDF() {
+  const ws = getWatches();
+  if (!ws.length) { showToast('No hay relojes en la colección'); return; }
+  try {
+    await generateCollectionPDF();
+  } catch(e) {
+    showToast('Error al generar PDF: ' + e.message);
+    console.error(e);
+  }
+}
+window.handleExportPDF = handleExportPDF;
+
+function handleExportJSON() {
+  const ws  = getWatches();
+  if (!ws.length) { showToast('No hay datos que exportar'); return; }
+  const blob = new Blob([JSON.stringify({ version: 2, exported: Date.now(), watches: ws }, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `horlogerie-backup-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Copia de seguridad descargada');
+}
+window.handleExportJSON = handleExportJSON;
+
+function handleImportJSON() {
+  document.getElementById('import-json-input').click();
+}
+window.handleImportJSON = handleImportJSON;
+
+function processImportJSON(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      const incoming = data.watches || (Array.isArray(data) ? data : null);
+      if (!incoming) throw new Error('Formato no reconocido');
+      showConfirm(
+        'Restaurar copia de seguridad',
+        `Se importarán ${incoming.length} relojes. Los datos actuales se conservarán (no se borran).`,
+        () => {
+          const existing = getWatches();
+          const existingIds = new Set(existing.map(w => w.id));
+          let added = 0;
+          incoming.forEach(w => {
+            if (!existingIds.has(w.id)) {
+              watches.push(w);
+              added++;
+            }
+          });
+          save();
+          showToast(`${added} relojes importados`);
+          renderHome();
+          renderSettings();
+        }
+      );
+    } catch(err) {
+      showToast('Error al leer el archivo: ' + err.message);
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
+}
+window.processImportJSON = processImportJSON;
+
+// Patch showView to render settings
+const _origShowView = window.showView;
+window.showView = function(v) {
+  _origShowView(v);
+  if (v === 'settings') renderSettings();
+};
