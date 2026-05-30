@@ -296,7 +296,10 @@ function renderPrice(w) {
   if (w.price?.value) {
     box.style.display = 'block';
     document.getElementById('d-price').textContent      = w.price.value;
-    document.getElementById('d-price-note').textContent = w.price.note || '';
+    const noteEl = document.getElementById('d-price-note');
+    let noteText = w.price.note || '';
+    if (w.sources) noteText += (noteText ? ' · ' : '') + 'Fuentes: ' + w.sources;
+    noteEl.textContent = noteText;
   } else {
     box.style.display = 'none';
   }
@@ -365,13 +368,17 @@ async function fetchWatchDetails(id) {
   const btn      = document.getElementById('d-fetch-btn');
   const statusEl = document.getElementById('d-fetch-status');
   btn.disabled   = true;
-  btn.innerHTML  = '<span class="loading-spinner"></span> Buscando información...';
-  statusEl.innerHTML = '';
+  btn.innerHTML  = '<span class="loading-spinner"></span> Buscando en internet...';
+  statusEl.innerHTML = `<div class="identify-progress" style="margin-bottom:8px;">
+    <span class="loading-spinner"></span>
+    <span>Consultando tiendas y fuentes especializadas…</span>
+  </div>`;
 
   try {
     const data = await apiFetchDetails(w.brand, w.model, w.ref || '', w.type);
-    if (data.specs) updateWatch(id, { specs: data.specs });
-    if (data.price) updateWatch(id, { price: data.price });
+    if (data.specs)   updateWatch(id, { specs: data.specs });
+    if (data.price)   updateWatch(id, { price: data.price });
+    if (data.sources) updateWatch(id, { sources: data.sources });
     renderSpecs(getWatch(id));
     renderPrice(getWatch(id));
     statusEl.innerHTML = `<div class="fetch-status-ok"><i class="ti ti-check"></i> Información actualizada</div>`;
@@ -439,6 +446,27 @@ function closeAddModal() {
 function closeModalIfOutside(e) {
   if (e.target.id === 'add-modal') closeAddModal();
 }
+
+/* ─────────────────── PHOTO SHEET ─────────────────── */
+
+function openPhotoSheet() {
+  document.getElementById('photo-sheet').style.display = 'flex';
+}
+function closePhotoSheet() {
+  document.getElementById('photo-sheet').style.display = 'none';
+}
+function closePhotoSheetIfOutside(e) {
+  if (e.target.id === 'photo-sheet') closePhotoSheet();
+}
+function choosePhotoSource(source) {
+  closePhotoSheet();
+  const inputId = source === 'camera' ? 'photo-input-camera' : 'photo-input-library';
+  document.getElementById(inputId).click();
+}
+window.openPhotoSheet           = openPhotoSheet;
+window.closePhotoSheet          = closePhotoSheet;
+window.closePhotoSheetIfOutside = closePhotoSheetIfOutside;
+window.choosePhotoSource        = choosePhotoSource;
 
 function handlePhotoUpload(e) {
   const file = e.target.files[0];

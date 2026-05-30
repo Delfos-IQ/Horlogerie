@@ -152,12 +152,14 @@
 
       <div class="form-field">
         <label class="form-label">Foto del reloj</label>
-        <div class="photo-upload-area" id="photo-area" onclick="document.getElementById('photo-input').click()">
+        <div class="photo-upload-area" id="photo-area" onclick="openPhotoSheet()">
           <i class="ti ti-camera" style="font-size:32px;color:var(--mid);" aria-hidden="true"></i>
           <div class="photo-upload-label">Toca para añadir foto</div>
           <img id="photo-preview" style="display:none;" alt="Vista previa">
         </div>
-        <input type="file" id="photo-input" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoUpload(event)">
+        <!-- Two separate inputs: one for camera, one for library -->
+        <input type="file" id="photo-input-camera"  accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoUpload(event)">
+        <input type="file" id="photo-input-library" accept="image/*"                       style="display:none;" onchange="handlePhotoUpload(event)">
       </div>
 
       <button class="identify-btn" id="identify-btn" onclick="identifyWatch()" style="display:none;">
@@ -309,6 +311,29 @@
         <div style="font-size:11px;color:var(--mid);margin-top:2px;">Datos guardados localmente en este dispositivo</div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- ========== PHOTO SOURCE SHEET ========== -->
+  <div class="modal-overlay" id="photo-sheet" style="display:none;" onclick="closePhotoSheetIfOutside(event)">
+    <div class="modal-sheet" style="padding-bottom:max(24px,env(safe-area-inset-bottom));">
+      <div class="modal-handle"></div>
+      <div class="modal-title" style="font-size:17px;margin-bottom:18px;">Añadir foto</div>
+      <button class="photo-source-btn" onclick="choosePhotoSource('camera')">
+        <i class="ti ti-camera" style="font-size:22px;color:var(--gold-light);"></i>
+        <div>
+          <div class="photo-source-title">Hacer una foto</div>
+          <div class="photo-source-sub">Abre la cámara del dispositivo</div>
+        </div>
+      </button>
+      <button class="photo-source-btn" onclick="choosePhotoSource('library')">
+        <i class="ti ti-photo" style="font-size:22px;color:var(--gold-light);"></i>
+        <div>
+          <div class="photo-source-title">Elegir de la librería</div>
+          <div class="photo-source-sub">Selecciona una foto existente</div>
+        </div>
+      </button>
+      <button class="modal-btn modal-btn-cancel" style="width:100%;margin-top:8px;" onclick="closePhotoSheet()">Cancelar</button>
     </div>
   </div>
 
