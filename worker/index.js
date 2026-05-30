@@ -151,42 +151,81 @@ async function handleDetails(request, env) {
   if (!brand || !model) return corsResponse({ error: 'Missing brand or model' }, 400);
 
   const watchId  = [brand, model, ref].filter(Boolean).join(' ');
-  const movLabel = type === 'automatic' ? 'automatic' : type === 'quartz' ? 'quartz' : 'manual winding';
+  const movLabel = type === 'automatic' ? 'automático' : type === 'quartz' ? 'cuarzo' : 'cuerda manual';
 
-  const prompt = `You are a professional horologist, certified watch appraiser, and market analyst.
-Provide precise technical specifications and current market data for: ${watchId} (${movLabel}).
+  /* ── PASS 1: Web search for real specs and prices ── */
+  // Use Groq's built-in web_search tool to fetch real data from the internet
+  const searchPrompt = `Search the web for the exact technical specifications and current market price of this watch: ${watchId} (${movLabel}).
 
-Think carefully — only include values you are confident about.
+Search for:
+1. Official manufacturer specs: movement/caliber, crystal type, case material, water resistance, power reserve, dimensions, bracelet
+2. Current retail price in EUR from authorized dealers or official website
+3. Pre-owned/secondary market price in EUR from Chrono24, WatchBox, or similar
 
-Respond ONLY with this JSON (no markdown, no backticks):
+Use multiple searches if needed. Gather factual data only — do NOT invent or guess any specification.`;
+
+  let webData = '';
+  try {
+    const searchRes = await callGroqWithTools(env, {
+      model: MODEL_DETAILS,
+      max_tokens: 2000,
+      temperature: 0.1,
+      tools: [{ type: 'function', function: {
+        name: 'web_search',
+        description: 'Search the web for current information',
+        parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] }
+      }}],
+      tool_choice: 'auto',
+      messages: [{ role: 'user', content: searchPrompt }]
+    });
+    // Extract all text content from the response (tool results + final answer)
+    webData = searchRes.choices?.[0]?.message?.content || '';
+    // Also capture tool calls context if model returned search results inline
+    if (!webData && searchRes.choices?.[0]?.message?.tool_calls) {
+      webData = JSON.stringify(searchRes.choices[0].message.tool_calls);
+    }
+  } catch(e) {
+    // Web search failed — fall through to knowledge-based pass
+    console.warn('Web search pass failed:', e.message);
+  }
+
+  /* ── PASS 2: Structure the real data into JSON ── */
+  const structurePrompt = `You are a watch data extractor. Based on the research below about "${watchId}", extract ONLY factual information found in the research.
+
+RESEARCH DATA:
+${webData || 'No web data available — use your training knowledge but mark uncertain values with "~".'}
+
+Extract the data and respond ONLY with this JSON (no markdown, no backticks, no extra text):
 {
   "specs": {
-    "calibre":     "caliber name and number (e.g. Rolex Cal. 3135, ETA 2824-2, Sellita SW200)",
-    "movimiento":  "movement detail: type, frequency, jewel count (e.g. COSC chronometer, 28800vph, 31 jewels)",
-    "cristal":     "crystal: material + coating + profile (e.g. Sapphire, double anti-reflective, flat)",
-    "brazalete":   "bracelet or strap: name, material, clasp (e.g. Oyster bracelet, 904L steel, Oysterlock clasp)",
-    "esfera":      "dial: color, indexes, finishing, complications (e.g. Black lacquered, applied gold indices, date 3h)",
-    "caja":        "case: material + treatment (e.g. 316L steel brushed/polished, screw-down crown, solid caseback)",
-    "resistencia": "water resistance (e.g. 300m / 30 ATM)",
-    "reserva":     "power reserve — leave empty for quartz (e.g. 48h, 70h)",
-    "diametro":    "case diameter (e.g. 40mm)",
-    "grosor":      "case thickness (e.g. 12.5mm)"
+    "calibre":     "movement caliber name and number found in research, or empty string",
+    "movimiento":  "movement type, frequency, jewels found in research, or empty string",
+    "cristal":     "crystal type and profile found in research, or empty string",
+    "brazalete":   "bracelet or strap type and material found in research, or empty string",
+    "esfera":      "dial description found in research, or empty string",
+    "caja":        "case material and features found in research, or empty string",
+    "resistencia": "water resistance found in research, or empty string",
+    "reserva":     "power reserve found in research, empty string if quartz or not found",
+    "diametro":    "case diameter found in research, or empty string",
+    "grosor":      "case thickness found in research, or empty string"
   },
   "price": {
-    "value": "estimated price range in EUR (e.g. 'Nuevo: ~8.100 € · Segundamano: 6.500 – 7.800 €')",
-    "note":  "boutique vs grey market context, demand trend, max 2 sentences"
-  }
+    "value": "price range in EUR found in research (e.g. 'Nuevo: ~350 € · Segundamano: 180–250 €'), or empty string if not found",
+    "note":  "source and context of the price data, max 1 sentence, or empty string"
+  },
+  "sources": "brief list of sources consulted (e.g. 'Amazon.es, Chrono24, marca oficial')"
 }
-Leave empty string for any value you are not certain about. Never invent specifications.`;
+CRITICAL: If a value was NOT found in the research, use empty string. Do not invent or estimate.`;
 
-  const groqRes = await callGroq(env, {
+  const structRes = await callGroq(env, {
     model: MODEL_DETAILS,
-    max_tokens: 1000,
-    temperature: 0.15,
-    messages: [{ role: 'user', content: prompt }]
+    max_tokens: 800,
+    temperature: 0,
+    messages: [{ role: 'user', content: structurePrompt }]
   });
 
-  return corsResponse(parseJSON(groqRes.choices?.[0]?.message?.content || '{}'), 200);
+  const result = parseJSON(structRes.choices?.[0]?.message?.content || '{}');
+  return corsResponse(result, 200);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -253,6 +292,32 @@ async function callGroq(env, payload) {
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Groq ${res.status}: ${err.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
+// Groq compound-beta supports real web search via the compound model
+async function callGroqWithTools(env, payload) {
+  // Use the compound-beta model which has native web search built in
+  const compoundPayload = {
+    ...payload,
+    model: 'compound-beta',   // Groq's agentic model with built-in web search
+    tools: undefined,
+    tool_choice: undefined,
+  };
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${env.GROQ_API_KEY}`
+    },
+    body: JSON.stringify(compoundPayload)
+  });
+  if (!res.ok) {
+    // compound-beta not available — fall back to standard model
+    const err = await res.text();
+    console.warn('compound-beta failed, falling back:', err.slice(0, 100));
+    return callGroq(env, { ...payload, tools: undefined, tool_choice: undefined });
   }
   return res.json();
 }
